@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  host-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure C build
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build C core and simulator
+        run: cmake --build build --parallel
+      - name: Run C and simulator tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Run dependency-free Python tests
+        run: python3 -m unittest discover -s tests -p 'test_python_tools.py' -v
+      - name: Replay a dashboard capture
+        run: python3 tools/dashboard.py --file examples/sample_telemetry.ndjson --no-ansi --max-frames 1 > /dev/null
+      - name: Check Python syntax
+        run: python3 -m compileall -q tools tests
