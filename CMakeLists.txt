@@ -42,11 +42,16 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME core_unit_tests COMMAND core_tests)
 
-    find_package(Python3 COMPONENTS Interpreter)
+    find_package(Python3 3.10 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
         add_test(NAME simulator_integration_tests
                  COMMAND ${Python3_EXECUTABLE}
                          ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sim_cli.py
                          $<TARGET_FILE:sensor_hub_sim>)
+        add_test(NAME python_tool_tests
+                 COMMAND ${Python3_EXECUTABLE} -m unittest discover
+                         -s tests -p "test_*.py" -v)
+        set_tests_properties(python_tool_tests PROPERTIES
+                             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
     endif()
 endif()

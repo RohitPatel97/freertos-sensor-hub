@@ -1,5 +1,7 @@
 # FreeRTOS Sensor Hub
 
+[![CI](https://github.com/RohitPatel97/freertos-sensor-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/RohitPatel97/freertos-sensor-hub/actions/workflows/ci.yml)
+
 A fault-aware, four-task sensor acquisition application for an
 **STM32F401RE**, **MPU6050**, and **BMP280**. The embedded adapter demonstrates
 100 Hz interrupt-driven sampling, bounded FreeRTOS queues, mutex-protected I2C,
@@ -34,15 +36,15 @@ and GitHub Actions CI.
 | Backpressure visibility | bounded raw queue and overwrite-latest telemetry queue | slow-consumer scenario asserts queue drops | Host verified |
 | Disconnect/recovery | shared host/target state machine; offline after three failed acquisitions | either/both sensors, startup absence, and brief dropout scenarios | Host verified |
 | Timing instrumentation | DWT CYCCNT around acquisition and processing | deterministic synthetic timing fields on host | Target measurement pending |
-| Watchdog/task health | per-task heartbeat deadlines; refresh only when all four are alive | stalled processing task causes refresh withholding | Host verified |
-| 10 Hz telemetry + dashboard | versioned NDJSON over UART and terminal dashboard | strict parser/renderer unit tests | Host verified; UART pending |
+| Watchdog/task health | per-task heartbeat deadlines; refresh only when all four are alive | stalled acquisition also expires processing health once input stops | Host verified |
+| 10 Hz telemetry + dashboard | versioned NDJSON over UART, file replay, and stdin | parser/renderer tests and compiled-simulator outage/recovery replays | Host verified; UART pending |
 
 ## Architecture
 
-Latest local verification (September 4, 2026): **5 C test groups**, **11 simulator
-scenarios**, **69 CLI rejection cases**, and **5 Python tool tests** passed.
-The current C sources were rebuilt using Zig 0.16.0 / Clang 21.1.0 with strict
-C99 warnings; the sample dashboard replay passed. See
+Latest local verification (October 1, 2026): **5 C test groups**, **12 simulator
+scenarios**, **2 simulator-to-dashboard recovery replays**, **69 CLI rejection
+cases**, and **22 Python tool tests** passed. A fresh CMake/Ninja Release build
+used Zig 0.16.0 / Clang 21.1.0 with strict warnings and Python 3.12.14. See
 [validation evidence](docs/VALIDATION.md) and [project workflow](WORKFLOW.md).
 
 ```mermaid
@@ -97,14 +99,16 @@ Key invariants:
 
 ## Quick start: deterministic host path
 
-The C host path needs CMake 3.16+ and a C99 compiler. It uses the same drivers,
+The C host path needs CMake 3.16+ and a C99 compiler. Install Python 3.10+ before
+configuring to include simulator integration and Python tooling tests in CTest.
+It uses the same drivers,
 compensation, processing, health, retry, and telemetry modules as the target
 adapter.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure
 ./build/sensor_hub_sim --duration-ms 3000
 ```
 
@@ -116,11 +120,26 @@ No C toolchain is required to exercise the protocol and dashboard:
 ```bash
 python tools/reference_sim.py --duration-ms 3000 > capture.ndjson
 python tools/dashboard.py --file capture.ndjson --no-ansi
-python -m unittest discover -s tests -p "test_python_tools.py" -v
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
 The reference generator is deliberately labeled as a tooling model. It does not
 replace execution of the C simulator in CI.
+
+### Watch a sensor fail and recover
+
+Pipe the compiled simulator directly into the dashboard; `--file -` reads
+standard input, so no capture file or serial hardware is needed:
+
+```bash
+./build/sensor_hub_sim --duration-ms 2000 --disconnect mpu --disconnect-at-ms 500 --reconnect-at-ms 1000 | python tools/dashboard.py --file - --no-ansi
+```
+
+Expect 20 snapshots: acceleration and gyro readings become `n/a` during the
+outage, the MPU6050 status becomes `OFFLINE` after three failed acquisitions,
+and readings resume after reconnection. The barometer continues reporting.
+Use `--disconnect all` to exercise simultaneous sensor loss. The simulator's
+JSON summary is written to stderr, separately from telemetry on stdout.
 
 ## Fault injection
 
@@ -178,14 +197,18 @@ checks prevent truncation and a `UINT32_MAX` duration loop wrapping indefinitely
 | Long outages must not overflow error state | Saturating failure count in shared host/target status logic | 303 failures leave count at 255 and one disconnect; recovery clears the count |
 | Slow consumers must not create unlimited backlog | Fixed queue capacity and observable drops | Capacity 2 and a 30 ms processing period produce drops |
 | Task failure must stop watchdog service | Per-task heartbeat deadlines | Processing stall withholds service; acquisition stall also increases tick overruns |
+| A task waiting for input must not look productive | Processing heartbeat follows a successful dequeue, matching the target adapter | Acquisition stall at 1200 ms produces four deadline misses across the 2 s and 3 s health checks; boot stall leaves both tasks unhealthy |
+| A valid missing-sensor frame must not stop monitoring | Render null payloads as `n/a`, independently of debounced sensor state | Two compiled-simulator recovery replays render every snapshot through MPU-only and simultaneous outages |
+| Corrupted captures must not terminate a session | Validate each line and skip malformed frames with a diagnostic | Invalid UTF-8, oversized numbers, invalid schema types, and decoder-limit failures are rejected; following valid frames survive |
 | A millisecond clock can wrap | Unsigned elapsed-time comparison | Across `UINT32_MAX`, 30 ms passes and 31 ms misses the acquisition deadline |
 | Invalid sensor data must not cause arithmetic errors | Validate raw ADC values and guard compensation arithmetic | Negative/sentinel/out-of-range raw data, zero pressure calibration, and overflowing corrupt trim are rejected without modifying output |
 | Invalid CLI inputs must fail promptly | Strict decimal/range checks and bounded duration | 69 malformed or out-of-range inputs exit 2 without telemetry |
 
-Tests are in [`tests/c/test_core.c`](tests/c/test_core.c) and
-[`tests/test_sim_cli.py`](tests/test_sim_cli.py): **5 C test groups, 11 compiled
-simulator scenarios, and 69 CLI rejection cases**, plus Python parser/dashboard
-tests. Run the quick-start commands above. See
+Tests are in [`tests/c/test_core.c`](tests/c/test_core.c),
+[`tests/test_sim_cli.py`](tests/test_sim_cli.py), and the Python `tests/test_*.py`
+modules: **5 C test groups, 12 compiled simulator scenarios, 2 dashboard recovery
+replays, 69 CLI rejection cases, and 22 Python tests**. With Python available,
+CTest runs all three suites. Run the quick-start commands above. See
 [`docs/VALIDATION.md`](docs/VALIDATION.md) for execution evidence and
 [`WORKFLOW.md`](WORKFLOW.md) for follow-up work.
 
@@ -217,8 +240,13 @@ python tools/dashboard.py --port COM5 --baud 115200
 ```
 
 Use `--demo` for an endless simulated feed, `--file` to replay a capture,
+`--file -` to read piped NDJSON,
 `--no-ansi` for logs/CI, and `--max-frames N` for bounded runs. Malformed lines
-are reported and skipped rather than terminating a live session.
+are reported to stderr and skipped. Missing IMU or barometer payloads display
+`n/a`, including the debounce interval when sensor status still says `ONLINE`.
+File and stdin replay isolate invalid UTF-8 to its affected line. Integer
+fields must fit the firmware's unsigned widths; sensor numbers must be finite.
+Unknown additive fields remain available through the parser's raw mapping.
 
 ## Hardware and wiring
 
@@ -285,6 +313,8 @@ IWDG starts on STM32 it cannot be stopped without reset.
 ├── tools/                         # Parser, dashboard, reference generator
 ├── tests/c/                       # Portable C unit tests
 ├── tests/test_python_tools.py     # Python protocol/dashboard tests
+├── tests/test_dashboard.py        # Outage rendering and file/stdin replay
+├── tests/test_telemetry_parser.py # Schema, numeric bounds, and malformed input
 ├── tests/test_sim_cli.py          # Compiled-simulator black-box scenarios
 ├── docs/                          # Protocol and validation details
 └── CMakeLists.txt

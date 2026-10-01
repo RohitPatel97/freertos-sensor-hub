@@ -9,7 +9,7 @@ from typing import Any, Iterable, Iterator, Mapping
 
 
 class TelemetryError(ValueError):
-    """Raised when a line is JSON but not a supported telemetry frame."""
+    """Raised when a line is not a supported telemetry frame."""
 
 
 @dataclass(frozen=True)
@@ -36,16 +36,23 @@ def _mapping(value: Any, name: str) -> Mapping[str, Any]:
     return value
 
 
-def _integer(value: Any, name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise TelemetryError(f"{name} must be a non-negative integer")
+def _integer(value: Any, name: str, maximum: int = 2**32 - 1) -> int:
+    if (isinstance(value, bool) or not isinstance(value, int) or
+            not 0 <= value <= maximum):
+        raise TelemetryError(f"{name} must be an integer between 0 and {maximum}")
     return value
 
 
 def _number(value: Any, name: str) -> int | float:
-    if (isinstance(value, bool) or not isinstance(value, (int, float)) or
-            not math.isfinite(value)):
-        raise TelemetryError(f"{name} must be numeric")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TelemetryError(f"{name} must be a finite number")
+    try:
+        finite = math.isfinite(value)
+    except OverflowError as exc:
+        # JSON integers are unbounded; dashboard numeric formatting is not.
+        raise TelemetryError(f"{name} is too large to represent") from exc
+    if not finite:
+        raise TelemetryError(f"{name} must be a finite number")
     return value
 
 
@@ -65,10 +72,13 @@ def decode_line(line: str | bytes) -> TelemetryFrame:
                 TelemetryError(f"non-finite JSON number: {value}")
             ),
         )
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except TelemetryError:
+        raise
+    except (ValueError, RecursionError) as exc:
+        # Include malformed UTF-8, integer digit limits, and excessive nesting.
         raise TelemetryError(f"invalid JSON: {exc}") from exc
     root = _mapping(payload, "frame")
-    if root.get("schema") != 1 or root.get("type") != "telemetry":
+    if _integer(root.get("schema"), "schema") != 1 or root.get("type") != "telemetry":
         raise TelemetryError("expected a schema-1 telemetry frame")
     sensors = _mapping(root.get("sensors"), "sensors")
     health = _mapping(root.get("health"), "health")
@@ -78,8 +88,11 @@ def decode_line(line: str | bytes) -> TelemetryFrame:
             raise TelemetryError(f"invalid state for {sensor_name}")
     if health.get("watchdog") not in ("fed", "withheld"):
         raise TelemetryError("invalid watchdog state")
-    imu = root.get("imu")
-    baro = root.get("baro")
+    for payload_name in ("imu", "baro"):
+        if payload_name not in root:
+            raise TelemetryError(f"missing required field: {payload_name}")
+    imu = root["imu"]
+    baro = root["baro"]
     if imu is not None:
         imu = _mapping(imu, "imu")
         _vector3(imu.get("accel_g"), "imu.accel_g")
@@ -92,7 +105,7 @@ def decode_line(line: str | bytes) -> TelemetryFrame:
         _number(baro.get("altitude_m"), "baro.altitude_m")
     return TelemetryFrame(
         sequence=_integer(root.get("seq"), "seq"),
-        timestamp_us=_integer(root.get("ts_us"), "ts_us"),
+        timestamp_us=_integer(root.get("ts_us"), "ts_us", maximum=2**64 - 1),
         mpu6050_online=sensors["mpu6050"] == "online",
         bmp280_online=sensors["bmp280"] == "online",
         imu=imu,

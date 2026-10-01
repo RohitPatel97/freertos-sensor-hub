@@ -371,8 +371,9 @@ int main(int argc, char **argv) {
                 }
                 counters.samples_processed++;
                 have_latest = true;
+                /* Match the target: blocked input is not processing progress. */
+                hub_health_heartbeat(&health, HUB_TASK_PROCESSING, now_ms);
             }
-            hub_health_heartbeat(&health, HUB_TASK_PROCESSING, now_ms);
         }
         if ((now_ms % (1000U / HUB_TELEMETRY_RATE_HZ)) == 0U &&
             !task_stalled(&options, HUB_TASK_TELEMETRY, now_ms)) {

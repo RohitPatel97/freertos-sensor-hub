@@ -6,12 +6,15 @@ artifact (build log, capture, or test note) to a release or pull request.
 
 ## Automated host checks
 
-Recorded September 4, 2026 on Windows: fresh Zig 0.16.0 / Clang 21.1.0
-compilation passed with strict C99 warnings. All 5 C groups, 11 simulator
-scenarios, 69 CLI rejection cases, and 5 Python tool tests passed. Sample
-dashboard replay also succeeded. These direct native builds use current source;
-old generated executables are not publication artifacts. Physical target
-validation remains pending below.
+Recorded October 1, 2026 on Windows: a fresh CMake 4.4.2 / Ninja Release build
+using Zig 0.16.0 / Clang 21.1.0 passed with strict warnings. Python 3.12.14 ran
+the tooling checks. CTest passed all three suites: 5 C groups, 12 simulator
+scenarios, 2 simulator-to-dashboard recovery replays, 69 CLI rejection cases,
+and 22 Python tests. Existing ignored executables were not used as validation
+of the changed source. Physical target validation remains pending below.
+
+The local Zig setup used `zig cc` as the C compiler and a local `zig ar` wrapper
+as CMake's archiver. Standard GCC/Clang CMake commands remain the CI path.
 
 | Check | Command / CI test | Pass criterion |
 |---|---|---|
@@ -21,9 +24,11 @@ validation remains pending below.
 | Bus/sensor fault | same integration test | BMP goes offline, MPU remains online, retry/error/disconnect counters rise |
 | Queue pressure | same integration test | raw queue drops are nonzero and simulation remains bounded |
 | Task stall | same integration test | watchdog refresh is withheld and deadline misses rise |
+| Starved processing | same integration test | acquisition stall at 1200 ms records four misses at 2/3 s; boot stall never establishes acquisition or processing health |
 | Recovery | same integration test | MPU, BMP, both-device, and startup-absence payloads recover; one-cycle faults do not flap status |
 | Invalid CLI inputs | same integration test | 69 malformed and out-of-range inputs exit 2 promptly without telemetry |
-| Python tooling | `python -m unittest ...` | parser, noise handling, faults, and renderer pass |
+| Dashboard recovery | same integration test | all 20 frames render for each of MPU-only and both-sensor outages; null payloads display `n/a`, then data returns |
+| Python tooling | `python_tool_tests` / `python -m unittest discover -s tests -p "test_*.py" -v` | 22 tests cover parser bounds, null payloads, malformed-line continuation, file/stdin replay, and rendering |
 
 CI is evidence for host behavior only; it does not compile the STM32 adapter
 against Cube-generated sources.
