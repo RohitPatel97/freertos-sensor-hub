@@ -16,10 +16,8 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - name: Build C core and simulator
         run: cmake --build build --parallel
-      - name: Run C and simulator tests
+      - name: Run C, simulator, and Python tooling tests
         run: ctest --test-dir build --output-on-failure
-      - name: Run dependency-free Python tests
-        run: python3 -m unittest discover -s tests -p 'test_python_tools.py' -v
       - name: Replay a dashboard capture
         run: python3 tools/dashboard.py --file examples/sample_telemetry.ndjson --no-ansi --max-frames 1 > /dev/null
       - name: Check Python syntax

@@ -30,14 +30,19 @@ def sparkline(values: Iterable[float]) -> str:
     low, high = min(points), max(points)
     if high == low:
         return SPARKS[3] * len(points)
+    # Normalize before subtraction/multiplication so finite values near the
+    # float limit cannot overflow the range calculation.
+    scale = max(abs(low), abs(high))
+    points = [value / scale for value in points]
+    low, high = min(points), max(points)
     return "".join(SPARKS[min(7, int((value - low) * 7 / (high - low)))] for value in points)
 
 
 def render(frame: TelemetryFrame, pressure_history: Iterable[float] = ()) -> str:
     imu = frame.imu or {}
     baro = frame.baro or {}
-    accel = imu.get("accel_g", [None, None, None])
-    gyro = imu.get("gyro_dps", [None, None, None])
+    accel = imu.get("accel_g")
+    gyro = imu.get("gyro_dps")
     def vector(values: Any) -> str:
         return "  n/a" if not isinstance(values, list) else "  ".join(f"{value:8.3f}" for value in values)
     pressure = baro.get("pressure_pa")
@@ -80,7 +85,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--port", help="serial device, for example COM5 or /dev/ttyACM0")
-    source.add_argument("--file", type=Path, help="replay an NDJSON capture")
+    source.add_argument("--file", type=Path, help="replay an NDJSON capture; use - for stdin")
     source.add_argument("--demo", action="store_true", help="run the dependency-free reference generator")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--no-ansi", action="store_true", help="print snapshots instead of redrawing")
@@ -92,8 +97,13 @@ def main() -> int:
     if args.port:
         stream = serial_lines(args.port, args.baud)
     elif args.file:
-        opened = args.file.open("r", encoding="utf-8")
-        stream = opened
+        if args.file == Path("-"):
+            stream = sys.stdin.buffer
+        else:
+            # Decode each line inside decode_line so bad UTF-8 is handled just
+            # like malformed JSON, without losing subsequent valid frames.
+            opened = args.file.open("rb")
+            stream = opened
     else:
         stream = demo_lines()
     history: deque[float] = deque(maxlen=48)

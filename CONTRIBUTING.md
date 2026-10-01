@@ -7,7 +7,8 @@ about their validation boundary.
 
 1. Create a focused branch and explain the failure mode or capability in the PR.
 2. Build with strict warnings and run `ctest --test-dir build --output-on-failure`.
-3. Run `python -m unittest discover -s tests -p "test_python_tools.py" -v`.
+3. Run `python -m unittest discover -s tests -p "test_*.py" -v` for Python-only
+   changes (also included in CTest when Python is available).
 4. Add a deterministic regression for fixes to drivers, counters, scheduling, or
    the protocol. Avoid wall-clock sleeps and random unseeded inputs.
 5. Update `docs/PROTOCOL.md` for wire changes and `docs/VALIDATION.md` for new

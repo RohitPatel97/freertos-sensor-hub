@@ -11,8 +11,8 @@ Transport is UTF-8 newline-delimited JSON (NDJSON), one object per line, at
 |---|---|---|
 | `schema` | integer | Protocol version; currently `1` |
 | `type` | string | `telemetry` |
-| `seq` | non-negative integer | Acquisition sequence of the reported latest sample; wraps at 32 bits |
-| `ts_us` | non-negative integer | Acquisition timestamp in microseconds since boot |
+| `seq` | uint32 integer | Acquisition sequence of the reported latest sample; wraps at 32 bits |
+| `ts_us` | uint64 integer | Acquisition timestamp in microseconds since boot |
 | `sensors` | object | `mpu6050` and `bmp280`, each `online` or `offline` |
 | `imu` | object or null | Scaled acceleration, angular rate, and die temperature |
 | `baro` | object or null | Compensated temperature/pressure and derived altitude |
@@ -40,7 +40,19 @@ lower value after reconnect as reboot/wrap, not a negative delta.
 
 ## Parser behavior
 
-`tools/telemetry.py` rejects malformed JSON, unsupported schemas, negative
-counters, invalid states, and missing required objects. It preserves the raw
-mapping so future additive fields remain available. `tools/dashboard.py` skips
-bad lines to tolerate boot banners or partial serial reads.
+`tools/telemetry.py` requires an integer `schema` equal to `1`; JSON `true`,
+`1.0`, and `"1"` are rejected. Sequence, health counters, and timing durations
+must be integers in `0..4294967295`; timestamps must be integers in
+`0..18446744073709551615`. Booleans are not numeric values. Sensor numbers must
+be finite and representable by Python's floating-point tooling.
+
+Every required field must be present. In particular, omitted `imu` or `baro`
+is malformed, whereas an explicit `null` is a valid absent measurement. The
+dashboard displays that measurement as `n/a` regardless of debounced status.
+
+Malformed JSON/UTF-8, invalid states, numeric overflow, and JSON decoder
+digit/nesting-limit errors are exposed as `TelemetryError`. Stream consumers
+can skip these errors and continue with the next line. File and stdin replay
+read bytes so a bad UTF-8 line does not prevent later frames from being decoded.
+The parser preserves unknown additive fields in the raw mapping. This tightens
+validation of protocol v1 without changing the firmware's emitted wire format.
