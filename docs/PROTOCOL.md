@@ -56,3 +56,16 @@ can skip these errors and continue with the next line. File and stdin replay
 read bytes so a bad UTF-8 line does not prevent later frames from being decoded.
 The parser preserves unknown additive fields in the raw mapping. This tightens
 validation of protocol v1 without changing the firmware's emitted wire format.
+
+## Firmware formatter
+
+The C formatter writes directly into a bounded caller buffer. Active sensor
+payloads containing NaN or infinity are rejected, as is insufficient capacity.
+It returns the encoded byte count on success (excluding the terminating NUL),
+or `-1` on failure. Every failure clears a writable, nonempty output buffer;
+callers must still check the return value before transmitting. Fields belonging
+to an invalid sensor are ignored and encode as `null`.
+
+The build defaults to IWDG disabled for bring-up. In that configuration,
+`health.watchdog` is the health eligibility decision and does not establish an
+actual hardware refresh. Enable IWDG explicitly after validating the board.

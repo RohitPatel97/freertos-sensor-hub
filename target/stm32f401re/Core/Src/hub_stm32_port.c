@@ -73,7 +73,8 @@ bool hub_stm32_uart_write(HubStm32Port *port, const uint8_t *data,
 }
 
 void hub_stm32_watchdog_feed(HubStm32Port *port) {
-    if (port != NULL && port->watchdog != NULL) {
+    if (port != NULL && port->watchdog != NULL &&
+        port->watchdog->Instance == IWDG) {
         (void)HAL_IWDG_Refresh(port->watchdog);
     }
 }

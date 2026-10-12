@@ -8,11 +8,15 @@ about their validation boundary.
 1. Create a focused branch and explain the failure mode or capability in the PR.
 2. Build with strict warnings and run `ctest --test-dir build --output-on-failure`.
 3. Run `python -m unittest discover -s tests -p "test_*.py" -v` for Python-only
-   changes (also included in CTest when Python is available).
+   changes (also included in CTest; Python 3.10+ is required for test builds).
 4. Add a deterministic regression for fixes to drivers, counters, scheduling, or
    the protocol. Avoid wall-clock sleeps and random unseeded inputs.
 5. Update `docs/PROTOCOL.md` for wire changes and `docs/VALIDATION.md` for new
    evidence or hardware requirements.
+6. For target changes, build both `HUB_ENABLE_WATCHDOG=OFF` and `ON` with the
+   pinned Arm toolchain; retain maps, stack reports, and build logs. See the
+   [target guide](target/stm32f401re/README.md). A link/layout check is not a
+   hardware execution test.
 
 Portable code must remain C99, avoid heap allocation, use fixed-width types at
 wire/hardware boundaries, and compile with the repository warning policy. Keep
