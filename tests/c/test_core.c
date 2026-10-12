@@ -1,4 +1,6 @@
 #include <stdbool.h>
+#include <float.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -223,12 +225,72 @@ static void test_processing_health_and_telemetry(void) {
     CHECK(strstr(frame, "\"accel_g\":[") != NULL);
 }
 
+static void test_telemetry_failure_contract(void) {
+    HubProcessedSample sample = {0};
+    HubStatus status = {0};
+    HubCounters counters = {0};
+    char storage[HUB_TELEMETRY_BUFFER_SIZE + 2U];
+    char *frame = storage + 1;
+    char expected[HUB_TELEMETRY_BUFFER_SIZE];
+    float *fields[] = {&sample.accel_g[0], &sample.accel_g[1], &sample.accel_g[2],
+                      &sample.gyro_dps[0], &sample.gyro_dps[1], &sample.gyro_dps[2],
+                      &sample.imu_temperature_c, &sample.baro_temperature_c,
+                      &sample.pressure_pa, &sample.altitude_m};
+    const float invalid[] = {NAN, INFINITY, -INFINITY};
+    size_t field;
+    size_t value;
+    int length;
+    sample.valid_mask = HUB_MPU6050_VALID | HUB_BMP280_VALID;
+    memset(storage, '#', sizeof(storage));
+    length = hub_telemetry_format(expected, sizeof(expected), &sample, &status, &counters);
+    CHECK(length > 0);
+    CHECK(hub_telemetry_format(frame, (size_t)length + 1U, &sample, &status, &counters) == length);
+    CHECK(strcmp(frame, expected) == 0);
+    CHECK(storage[0] == '#' && frame[length + 1] == '#');
+    CHECK(hub_telemetry_format(frame, (size_t)length, &sample, &status, &counters) == -1);
+    CHECK(frame[0] == '\0');
+    CHECK(hub_telemetry_format(frame, 1U, &sample, &status, &counters) == -1);
+    CHECK(frame[0] == '\0');
+    for (field = 0U; field < sizeof(fields) / sizeof(fields[0]); ++field) {
+        for (value = 0U; value < sizeof(invalid) / sizeof(invalid[0]); ++value) {
+            *fields[field] = invalid[value];
+            strcpy(frame, "stale telemetry");
+            CHECK(hub_telemetry_format(frame, HUB_TELEMETRY_BUFFER_SIZE, &sample, &status, &counters) == -1);
+            CHECK(frame[0] == '\0');
+        }
+        *fields[field] = 0.0F;
+    }
+    for (field = 0U; field < sizeof(fields) / sizeof(fields[0]); ++field) { *fields[field] = FLT_MAX; }
+    strcpy(frame, "stale telemetry");
+    CHECK(hub_telemetry_format(frame, 32U, &sample, &status, &counters) == -1);
+    CHECK(frame[0] == '\0');
+    /* Invalid sensor fields are deliberately ignored and encoded as null. */
+    sample.valid_mask = 0U;
+    sample.accel_g[0] = NAN;
+    sample.pressure_pa = INFINITY;
+    CHECK(hub_telemetry_format(frame, HUB_TELEMETRY_BUFFER_SIZE, &sample, &status, &counters) > 0);
+    CHECK(strstr(frame, "\"imu\":null,\"baro\":null") != NULL);
+    CHECK(hub_telemetry_format(frame, HUB_TELEMETRY_BUFFER_SIZE, NULL, &status, &counters) == -1);
+    CHECK(frame[0] == '\0');
+    strcpy(frame, "stale telemetry");
+    CHECK(hub_telemetry_format(frame, HUB_TELEMETRY_BUFFER_SIZE, &sample, NULL, &counters) == -1);
+    CHECK(frame[0] == '\0');
+    strcpy(frame, "stale telemetry");
+    CHECK(hub_telemetry_format(frame, HUB_TELEMETRY_BUFFER_SIZE, &sample, &status, NULL) == -1);
+    CHECK(frame[0] == '\0');
+    frame[0] = '#';
+    CHECK(hub_telemetry_format(frame, 0U, &sample, &status, &counters) == -1);
+    CHECK(frame[0] == '#');
+    CHECK(hub_telemetry_format(NULL, 10U, &sample, &status, &counters) == -1);
+}
+
 int main(void) {
     test_i2c_retry_and_mutex();
     test_bmp280_datasheet_vector();
     test_sensor_state_transitions();
     test_health_deadline_boundaries_and_wrap();
     test_processing_health_and_telemetry();
-    puts("5 core test groups passed");
+    test_telemetry_failure_contract();
+    puts("6 core test groups passed");
     return 0;
 }

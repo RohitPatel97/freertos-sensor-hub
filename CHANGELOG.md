@@ -7,6 +7,11 @@ versions use Semantic Versioning.
 
 ### Fixed
 
+- C telemetry rejects non-finite active samples and always clears writable
+  output on failure; bounded direct formatting removes temporary payload copies.
+- The STM32 port does not refresh an uninitialized hardware watchdog and reuses
+  the formatter's returned length instead of scanning the frame with `strlen`.
+- Test builds require Python so integration/tooling checks cannot silently skip.
 - Dashboard rendering continues through null IMU payloads and invalid UTF-8
   capture lines; finite extreme values no longer overflow pressure sparklines.
 - Telemetry parsing enforces integer schema/field widths and explicit sensor
@@ -17,6 +22,12 @@ versions use Semantic Versioning.
 
 ### Added
 
+- Complete STM32F401RE Arm GNU build, pinned HAL/CMSIS/FreeRTOS sources, startup,
+  clock/peripheral configuration, linker layout, and ELF/HEX/BIN artifacts.
+- CI builds both watchdog configurations and checks vectors, memory bounds,
+  and real kernel symbols; maps, stack reports, and logs are retained.
+- Debugger-visible reset-cause flags and per-task stack high-water marks.
+- Formatter finite-value, exact-capacity, truncation, and output-clearing tests.
 - Dashboard stdin replay (`--file -`), 17 new Python tests, one boot-stall
   simulator scenario, and two compiled-simulator dashboard recovery replays.
 - Python tooling test discovery in CTest, alongside C and simulator checks.
