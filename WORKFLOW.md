@@ -1,5 +1,48 @@
 # FreeRTOS Sensor Hub workflow
 
+## October 12, 2026: complete firmware build and formatter optimization
+
+Published implementation: [fc7386e](https://github.com/RohitPatel97/freertos-sensor-hub/commit/fc7386e8c963c550c6078d64fd798868b1ad7dd5).
+
+**Problem:** the target adapter could not produce a firmware image without an
+external generated project. Dependency versions, startup, memory layout, and
+interrupt routing were unverified. Telemetry used 352 bytes of temporary arrays,
+could format NaN/infinity as invalid JSON, and left old data after some failures.
+The README had grown to 347 lines and mixed quick-start instructions with details.
+
+**Solution:** supply a complete Arm GNU CMake build with pinned real HAL/CMSIS/
+FreeRTOS sources, board setup, startup, linker script, bounded libc heap,
+interrupt routing, and explicit watchdog off/on builds. Add post-link vector/
+memory/symbol checks, CI firmware artifacts, reset-cause and stack diagnostics.
+Write telemetry directly into the caller buffer, reject non-finite active
+payloads, clear writable output on failure, and reuse the encoded byte count
+for UART transmission. Require Python for test builds. Reduce README to 148
+lines and move reference material into linked architecture/simulator guides.
+
+**Regression cases and observed results:**
+
+- New C regression failed on the original formatter accepting a non-finite
+  payload. Six C groups now pass, including all ten float fields, exact capacity,
+  truncation, null arguments, ignored invalid-sensor fields, and output clearing.
+- Host CTest passes all three suites: 12 simulator scenarios, 2 dashboard
+  recovery replays, 69 CLI rejections, and 22 Python tests, alongside the C tests.
+- Eight nominal/fault simulator cases retain identical telemetry/summary bytes.
+- Real Cortex-M4F builds pass with IWDG OFF and ON using Arm GNU 13.2.Rel1 /
+  GCC 13.2.1. Default flash usage is 36,916 bytes; enabled usage is 37,028 bytes.
+  Both account for 32,336 bytes of RAM, including reserved heaps/main stack.
+- Image checks pass for five vectors and kernel/application symbols; four
+  corrupted-image cases are rejected. Linker segments separate executable flash
+  from writable RAM. Python syntax and relative documentation links pass.
+- Arm GCC `-Os` stack reports: formatter 448 -> 96 bytes, append helper 28 bytes.
+  This excludes libc callees; it is not measured total task stack or latency.
+
+**Remaining limits:** the software/build deliverable is complete, but physical
+bring-up is still required. No claim is made for successful flashing, electrical
+operation, sensor readiness, target timing, live UART, watchdog resets, stack
+margins, or soak reliability. The default watchdog-disabled image reports health
+eligibility rather than actual watchdog refresh. Review the acceptance gates in
+[the target guide](target/stm32f401re/README.md) before hardware use.
+
 ## October 1, 2026: telemetry fault recovery
 
 Published implementation: [9c1ca0a](https://github.com/RohitPatel97/freertos-sensor-hub/commit/9c1ca0a8ac1e5ac4417a164dfa4abaad1f2c8007).
@@ -49,27 +92,27 @@ transport behavior or physical sensor recovery time.
 
 ## Reproduce validation
 
-Use a C99 compiler, CMake 3.16+, and Python 3.10+. Configure after installing
-Python so CTest includes all three suites. Standard CMake builds run in GitHub
-CI; the October 1 local run used a fresh build directory and a `zig ar` wrapper
-for the Zig toolchain's archiver.
+Use a C99 compiler, CMake 3.20+, and Python 3.10+. Test-enabled builds require
+Python and run all three suites. Standard GCC builds run in GitHub CI; local
+Windows host validation uses Zig 0.16.0 / Clang 21.1.0 and a `zig ar` wrapper.
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release --parallel
-ctest --test-dir build -C Release --output-on-failure
+cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Release
+cmake --build build/host --config Release --parallel
+ctest --test-dir build/host -C Release --output-on-failure
 python -m unittest discover -s tests -p "test_*.py" -v
 python tools/dashboard.py --file examples/sample_telemetry.ndjson --no-ansi --max-frames 1
 ```
 
-The suite contains 5 C test groups, 12 simulator scenarios, 2 dashboard recovery
-replays, 69 CLI rejection cases, and 22 Python tests. Host simulation exercises portable code;
-it does not compile FreeRTOS or establish measured timing on an MCU.
+The host suite contains 6 C test groups, 12 simulator scenarios, 2 dashboard
+recovery replays, 69 CLI rejection cases, and 22 Python tests. Use the separate
+[target build commands](target/stm32f401re/README.md) to compile/link actual
+FreeRTOS firmware; neither build measures execution timing on an MCU.
 
 ## Next three tasks
 
-1. Create a version-pinned STM32CubeMX configuration and save a real target build
-   log with the selected HAL, FreeRTOS, and compiler versions.
+1. Flash the watchdog-disabled image on the identified board and capture sensor
+   identity, I2C waveforms, TIM2 frequency, and 60 seconds of valid UART telemetry.
 2. Measure sensor startup/reinitialization readiness and worst-case I2C retries;
    collect physical unplug/replug and waveform evidence before claiming a
    hardware recovery time or 10 ms acquisition deadline.
@@ -81,5 +124,5 @@ result, remaining limits, and published implementation commit here. Run the
 commands above, review the diff, and inspect CI after publishing.
 Resume claims may cite embedded C, STM32/FreeRTOS design, I2C/UART, interrupts,
 bounded queues, mutexes, fault injection, unit/integration testing, CMake, and CI.
-Physical firmware builds, logic-analyzer captures, timing, and soak tests remain
-unverified until their artifacts are recorded.
+Actual target compilation is now verified. Physical execution, logic-analyzer
+captures, timing, and soak tests remain unverified until artifacts are recorded.
